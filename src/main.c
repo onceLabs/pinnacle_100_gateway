@@ -12,6 +12,7 @@
 #include <zephyr/drivers/modem/hl7800.h>
 
 #include "p100_socket.h"
+#include "ble.h"
 
 static K_SEM_DEFINE(lte_connected, 0, 1);
 
@@ -130,4 +131,5 @@ void main(void)
 
 	LOG_INF("Connected to LTE network");
 	p100_socket_init();
+	ble_init();
 }

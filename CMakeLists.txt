@@ -13,5 +13,6 @@ project(cellular_fundamentals)
 target_sources(app PRIVATE 
     src/main.c
     src/p100_socket.c
+    src/ble.c
 )
 # NORDIC SDK APP END

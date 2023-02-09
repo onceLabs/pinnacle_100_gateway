@@ -8,13 +8,18 @@
 
 LOG_MODULE_REGISTER(p100_socket_log, LOG_LEVEL_INF);
 
+// Thread stack setup
+#define P100_SOCKET_STACK_SIZE 1024
+#define P100_SOCKET_PRIORITY 5
+
+static void p100_socket_thread();
+
+K_THREAD_STACK_DEFINE(p100_socket_stack_area, P100_SOCKET_STACK_SIZE);
+struct k_thread p100_socket_thread_data;
+
 // Hostname and port for the echo server
-#define SERVER_HOSTNAME "nordicecho.westeurope.cloudapp.azure.com"
 #define SERVER_IP "20.56.165.163"
-// #define SERVER_IP "45.79.112.203"
 #define SERVER_PORT_INT 2444
-// #define SERVER_IP "0.0.0.0"
-#define SERVER_PORT "2444"
 
 #define MESSAGE_SIZE 256
 #define MESSAGE_TO_SEND "Hello from Pinnacle 100"
@@ -23,22 +28,19 @@ LOG_MODULE_REGISTER(p100_socket_log, LOG_LEVEL_INF);
 // Structure for the socket and server address
 static int sock;
 static struct sockaddr_storage server;
-static struct dns_resolve_context *dns;
 
 // Buffer for receiving from server
 static uint8_t recv_buf[MESSAGE_SIZE];
 
 static int server_resolve(void)
 {
-    int ret = 0;
-
     // Retrieve the relevant information from the result structure
     struct sockaddr_in *server4 = ((struct sockaddr_in *)&server);
 
     inet_pton(AF_INET, SERVER_IP, &server4->sin_addr.s_addr);
     server4->sin_family = AF_INET;
 
-    // Flip the port because of how it is being cast
+    // Flip the port bytes because of how it is being cast
     // This is an error in Zephyr
     server4->sin_port = ((SERVER_PORT_INT >> 8) & 0xff) | ((SERVER_PORT_INT << 8) & 0xff00);
 
@@ -75,6 +77,11 @@ static int server_connect(void)
     return 0;
 }
 
+int p100_socket_send(const void *buf, size_t len)
+{
+    return send(sock, buf, len, 0);
+}
+
 static void button_handler(uint32_t button_state, uint32_t has_changed)
 {
     switch (has_changed)
@@ -83,7 +90,7 @@ static void button_handler(uint32_t button_state, uint32_t has_changed)
         // Call send() when button 1 is pressed
         if (button_state & DK_BTN1_MSK)
         {
-            int err = send(sock, MESSAGE_TO_SEND, SSTRLEN(MESSAGE_TO_SEND), 0);
+            int err = p100_socket_send(MESSAGE_TO_SEND, SSTRLEN(MESSAGE_TO_SEND));
             if (err < 0)
             {
                 LOG_INF("Failed to send message, %d", errno);
@@ -95,26 +102,9 @@ static void button_handler(uint32_t button_state, uint32_t has_changed)
     }
 }
 
-int p100_socket_init()
+static void p100_socket_thread()
 {
     int received;
-
-    if (dk_buttons_init(button_handler) != 0)
-    {
-        LOG_ERR("Failed to initialize the buttons library");
-    }
-
-    if (server_resolve() != 0)
-    {
-        LOG_INF("Failed to resolve server name");
-        return -1;
-    }
-
-    if (server_connect() != 0)
-    {
-        LOG_INF("Failed to initialize client");
-        return -1;
-    }
 
     LOG_INF("Press button 1 send your message");
 
@@ -139,6 +129,35 @@ int p100_socket_init()
     }
 
     (void)close(sock);
+}
 
-    return -1;
+int p100_socket_init()
+{
+
+    if (dk_buttons_init(button_handler) != 0)
+    {
+        LOG_ERR("Failed to initialize the buttons library");
+    }
+
+    if (server_resolve() != 0)
+    {
+        LOG_INF("Failed to resolve server name");
+        return -1;
+    }
+
+    if (server_connect() != 0)
+    {
+        LOG_INF("Failed to initialize client");
+        return -1;
+    }
+
+    // Create the thread
+    k_thread_create(
+        &p100_socket_thread_data, p100_socket_stack_area,
+        K_THREAD_STACK_SIZEOF(p100_socket_stack_area),
+        p100_socket_thread,
+        NULL, NULL, NULL,
+        P100_SOCKET_PRIORITY, 0, K_NO_WAIT);
+
+    return 0;
 }
